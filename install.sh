@@ -36,14 +36,20 @@ esac
 [ -n "$install_dir" ] || usage
 
 case "$(uname -s)" in
-  Darwin) os=darwin ;;
-  Linux) os=linux ;;
+  Darwin)
+    os=darwin
+    case "$(uname -m)" in
+      arm64|aarch64) arch=arm64 ;;
+      *) printf 'Unsupported macOS architecture: Apple Silicon arm64 is required\n' >&2; exit 1 ;;
+    esac ;;
+  Linux)
+    os=linux
+    case "$(uname -m)" in
+      arm64|aarch64) arch=arm64 ;;
+      x86_64|amd64) arch=amd64 ;;
+      *) printf 'Unsupported Linux architecture\n' >&2; exit 1 ;;
+    esac ;;
   *) printf 'Unsupported operating system\n' >&2; exit 1 ;;
-esac
-case "$(uname -m)" in
-  arm64|aarch64) arch=arm64 ;;
-  x86_64|amd64) arch=amd64 ;;
-  *) printf 'Unsupported architecture\n' >&2; exit 1 ;;
 esac
 
 asset="codex-doctor-${os}-${arch}"

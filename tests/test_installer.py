@@ -26,6 +26,7 @@ class InstallerTest(unittest.TestCase):
         (self.shims / "uname").write_text('#!/bin/sh\ncase "$1" in -s) echo Darwin;; -m) echo arm64;; esac\n')
         (self.shims / "curl").write_text(
             '#!/bin/sh\nfor last; do :; done\n'
+            '[ -z "${TEST_CURL_MARKER:-}" ] || : > "$TEST_CURL_MARKER"\n'
             'while [ "$#" -gt 0 ]; do\n'
             '  if [ "$1" = -o ]; then output=$2; shift 2; else shift; fi\n'
             'done\ncp "$TEST_RELEASE_DIR/${last##*/}" "$output"\n'
@@ -57,7 +58,7 @@ class InstallerTest(unittest.TestCase):
         target = self.bin_dir / "codex-doctor"
         self.assertEqual(subprocess.check_output([str(target)]).strip(), b"fixture")
         self.release(b"#!/bin/sh\necho updated\n")
-        second = self.install(("--version", "v0.1.0"))
+        second = self.install(("--version", "v0.1.2"))
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual(subprocess.check_output([str(target)]).strip(), b"updated")
 
@@ -77,6 +78,19 @@ class InstallerTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Unsupported operating system", result.stderr)
         self.assertFalse(self.bin_dir.exists())
+
+    def test_intel_mac_is_rejected_before_download_and_keeps_install(self):
+        (self.shims / "uname").write_text('#!/bin/sh\ncase "$1" in -s) echo Darwin;; -m) echo x86_64;; esac\n')
+        self.bin_dir.mkdir()
+        target = self.bin_dir / "codex-doctor"
+        target.write_bytes(b"existing binary")
+        marker = self.root / "curl-was-called"
+        self.env["TEST_CURL_MARKER"] = str(marker)
+        result = self.install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Unsupported macOS architecture", result.stderr)
+        self.assertFalse(marker.exists())
+        self.assertEqual(target.read_bytes(), b"existing binary")
 
 
 if __name__ == "__main__":

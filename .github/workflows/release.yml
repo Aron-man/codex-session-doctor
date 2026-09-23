@@ -14,8 +14,6 @@ jobs:
         include:
           - runner: macos-14
             target: darwin-arm64
-          - runner: macos-15-intel
-            target: darwin-amd64
           - runner: ubuntu-22.04
             target: linux-amd64
           - runner: ubuntu-22.04-arm
@@ -101,4 +99,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release create "$GITHUB_REF_NAME" assets/* --verify-tag --title "$GITHUB_REF_NAME" --notes 'Standalone Codex Session Doctor clients for macOS and Linux.'
+        run: gh release create "$GITHUB_REF_NAME" assets/* --verify-tag --title "$GITHUB_REF_NAME" --notes 'Standalone Codex Session Doctor clients for Apple Silicon macOS and Linux arm64/amd64.'
