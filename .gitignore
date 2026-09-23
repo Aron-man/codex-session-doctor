@@ -1,0 +1,14 @@
+.data/
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+.venv-build/
+build/
+dist/
+*.spec
+# Local planning notes include machine paths and real session evidence.
+/PRODUCT.md
+/TECH.md
+/IMPLEMENTATION.md
+/PACKAGING.md
