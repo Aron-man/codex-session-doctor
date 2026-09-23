@@ -1,4 +1,5 @@
 import contextlib
+import io
 import json
 import os
 import socket
@@ -35,8 +36,18 @@ class ClientTest(unittest.TestCase):
         return subprocess.run(
             [sys.executable, str(DOCTOR), command, '--data-dir', str(self.data),
              '--codex-home', str(self.root), '--port', str(self.port), *extra],
-            capture_output=True, text=True, timeout=12,
+            capture_output=True, text=True, timeout=45,
         )
+
+    def startup_failure_details(self, result):
+        log = self.data / 'server.log'
+        if not log.exists():
+            return result.stderr
+        with log.open('rb') as stream:
+            stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, stream.tell() - 4096))
+            tail = stream.read().decode('utf-8', errors='replace')
+        return f'{result.stderr}\nserver.log (last 4096 bytes):\n{tail}'
 
     def test_version_defaults_and_health_without_database(self):
         result = subprocess.run([sys.executable, str(DOCTOR), '--version'],
@@ -56,7 +67,7 @@ class ClientTest(unittest.TestCase):
     def test_start_status_stop_and_scan_with_empty_root(self):
         self.assertNotEqual(self.cli('status').returncode, 0)
         started = self.cli('start')
-        self.assertEqual(started.returncode, 0, started.stderr)
+        self.assertEqual(started.returncode, 0, self.startup_failure_details(started))
         try:
             info = client.health(self.port)
             self.assertEqual(info['data_dir'], str(self.data))
@@ -117,6 +128,52 @@ class ClientTest(unittest.TestCase):
             self.assertEqual(client.start(args), 1)
         self.assertFalse((self.data / 'doctor.pid').exists())
         foreign.terminate.assert_called_once()
+
+    def test_start_accepts_service_ready_after_six_seconds(self):
+        args = Mock(data_dir=self.data, port=self.port, roots=[str(self.root)],
+                    open_browser=False)
+        service = {'service': client.SERVICE, 'pid': 42001,
+                   'data_dir': str(self.data)}
+        child = Mock(pid=42000)
+        child.poll.return_value = None
+        now = [0]
+        def sleep(_):
+            now[0] += 1
+        with patch.object(client.subprocess, 'Popen', return_value=child), \
+                patch.object(client, 'health', side_effect=[None] * 9 + [service]), \
+                patch.object(client.os, 'getpgid', return_value=child.pid), \
+                patch.object(client.time, 'monotonic', side_effect=lambda: now[0]), \
+                patch.object(client.time, 'sleep', side_effect=sleep):
+            self.assertEqual(client.start(args), 0)
+        self.assertGreater(now[0], 6)
+        self.assertLess(now[0], client.START_TIMEOUT_SECONDS)
+        self.assertEqual(json.loads((self.data / 'doctor.pid').read_text())['pid'], service['pid'])
+
+    def test_start_failure_identifies_exit_timeout_and_wrong_identity(self):
+        args = Mock(data_dir=self.data, port=self.port, roots=[str(self.root)],
+                    open_browser=False)
+        cases = [
+            (5, None, '子进程提前退出'),
+            (None, None, '30 秒内健康接口未就绪'),
+            (None, {'service': client.SERVICE, 'pid': 42001,
+                    'data_dir': '/other-data'}, '健康接口身份不匹配'),
+        ]
+        for exit_code, response, expected in cases:
+            with self.subTest(expected=expected):
+                child = Mock(pid=42000)
+                child.poll.return_value = exit_code
+                now = [0]
+                def sleep(_):
+                    now[0] += 10
+                output = io.StringIO()
+                with patch.object(client.subprocess, 'Popen', return_value=child), \
+                        patch.object(client, 'health', side_effect=[None] + [response] * 10), \
+                        patch.object(client.time, 'monotonic', side_effect=lambda: now[0]), \
+                        patch.object(client.time, 'sleep', side_effect=sleep), \
+                        contextlib.redirect_stderr(output):
+                    self.assertEqual(client.start(args), 1)
+                self.assertIn(expected, output.getvalue())
+                self.assertFalse((self.data / 'doctor.pid').exists())
 
     def test_codex_child_restores_original_linux_library_path(self):
         with patch.dict(os.environ, {'LD_LIBRARY_PATH': '/packaged',

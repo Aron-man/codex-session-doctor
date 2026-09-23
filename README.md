@@ -4,13 +4,13 @@
 
 ## 安装
 
-发布 Release 后可使用下方安装入口。当前仓库尚未发布可下载的 Release，此命令须在发布后使用。
+安装包通过 [GitHub Releases](https://github.com/Aron-man/codex-session-doctor/releases) 发布。已有稳定版 Release 时，可用下方命令安装最新版本。
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Aron-man/codex-session-doctor/main/install.sh | sh -s -- --repo Aron-man/codex-session-doctor
 ```
 
-安装器根据 macOS/Linux 和 arm64/amd64 下载相应的 GitHub Release 归档，验证 SHA-256 后将 `codex-doctor` 安装到 `~/.local/bin`；安装不需要 Python、sudo，也不会启动服务。请确保该目录在 `PATH` 中。指定版本和安装目录可用 `--version v0.1.0 --install-dir DIR`。再次运行同一安装命令即更新；验证或下载失败时保留原有可执行文件。
+安装器根据 macOS/Linux 和 arm64/amd64 下载相应的 GitHub Release 归档，验证 SHA-256 后将 `codex-doctor` 安装到 `~/.local/bin`；安装不需要 Python、sudo，也不会启动服务。请确保该目录在 `PATH` 中。指定版本和安装目录可用 `--version v0.1.1 --install-dir DIR`。再次运行同一安装命令即更新；验证或下载失败时保留原有可执行文件。
 
 ## 首次运行
 
@@ -41,6 +41,6 @@ node tests/test_prompt_ui.js
 
 构建独立客户端使用 Python 3.13 隔离环境，安装 `requirements-build.txt`，然后运行 `python scripts/build_release.py`。脚本只为当前主机平台生成 `dist/codex-doctor-<os>-<arch>.tar.gz` 和对应 `.sha256`。归档内仅有可执行文件、LICENSE 和 README。
 
-macOS arm64 需完成本机独立客户端构建、隔离安装与启动冒烟；macOS amd64、Linux amd64 和 Linux arm64 的工作流已配置，实际构建与运行结果需以 GitHub CI 为准。
+发布流程覆盖 macOS arm64、macOS amd64、Linux amd64 和 Linux arm64；每个平台都必须通过源码测试、独立打包、启动与网页资源检查后才发布。验证环境为 macOS 14（Apple Silicon）、macOS 15（Intel）及 Ubuntu 22.04；Linux 二进制需要 glibc 2.35 或兼容环境，其他系统可从源码运行。各版本实际结果见 [Release 工作流](https://github.com/Aron-man/codex-session-doctor/actions/workflows/release.yml)。
 
 项目使用 MIT License。

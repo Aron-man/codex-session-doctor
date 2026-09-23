@@ -16,6 +16,7 @@ from . import __version__, scanner, server, store
 
 
 SERVICE = 'codex-session-doctor'
+START_TIMEOUT_SECONDS = 30
 
 
 def default_data_dir():
@@ -109,7 +110,8 @@ def start(args):
         child = subprocess.Popen(_child_command(args), stdin=subprocess.DEVNULL,
                                  stdout=log, stderr=subprocess.STDOUT,
                                  start_new_session=True, env=env)
-    deadline = time.monotonic() + 6
+    deadline = time.monotonic() + START_TIMEOUT_SECONDS
+    failure = f'{START_TIMEOUT_SECONDS} 秒内健康接口未就绪'
     while time.monotonic() < deadline:
         info = health(args.port)
         if info:
@@ -122,18 +124,24 @@ def start(args):
                 if args.open_browser:
                     webbrowser.open(f'http://127.0.0.1:{args.port}')
                 return 0
+            failure = '健康接口身份不匹配（服务名、数据目录或进程组）'
             break
-        if child.poll() is not None:
+        exit_code = child.poll()
+        if exit_code is not None:
+            failure = f'子进程提前退出（退出码 {exit_code}）'
             break
         time.sleep(0.1)
-    if child.poll() is None:
+    exit_code = child.poll()
+    if exit_code is None:
         child.terminate()
         try:
             child.wait(timeout=2)
         except subprocess.TimeoutExpired:
             child.kill()
             child.wait()
-    print(f'启动失败，查看 {args.data_dir / "server.log"}', file=sys.stderr)
+    elif failure == f'{START_TIMEOUT_SECONDS} 秒内健康接口未就绪':
+        failure = f'子进程提前退出（退出码 {exit_code}）'
+    print(f'启动失败：{failure}；查看 {args.data_dir / "server.log"}', file=sys.stderr)
     return 1
 
 
