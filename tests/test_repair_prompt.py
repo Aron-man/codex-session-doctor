@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import json
 
 from session_doctor import repair_prompt, server, store
 
@@ -109,6 +110,51 @@ class RepairPromptTest(unittest.TestCase):
         self.assertEqual(len(evidence['related_records']), 5)
         self.assertEqual(len(evidence['related_records'][0]['command']), 500)
         self.assertIn('验收与回报', prompt)
+
+    def test_new_tool_and_skill_kinds_use_target_not_log_as_edit_location(self):
+        for kind, phrase in [('skill_repeated_read','重复读取'),
+                             ('skill_read_discarded','stdout 重定向'),
+                             ('skill_read_failed','退出错误'),
+                             ('tool_output_truncated','真实截断标记')]:
+            with self.subTest(kind=kind):
+                iid=self.issue(kind)
+                self.con.execute('''UPDATE issues SET category=?,confidence=?,target_path=?,
+                    target_line=?,tool=?,command=? WHERE id=?''',
+                    ('skill' if kind.startswith('skill') else 'tool','high',
+                     '/tmp/work/SKILL.md',7,'exec_command','cat SKILL.md',iid))
+                prompt=repair_prompt.generate(self.con,iid)['prompt']
+                self.assertIn(phrase,prompt)
+                self.assertIn('"target_path": "/tmp/work/SKILL.md"',prompt)
+                self.assertIn('"target_line": 7',prompt)
+                self.assertIn('日志 path:line 是取证入口',prompt)
+
+    def test_config_prompt_is_bounded_and_does_not_require_session(self):
+        finding={'id':'config:demo','kind':'missing_skill','severity':'warning',
+                 'confidence':'high','title':'缺少 skill','evidence':'路径不存在',
+                 'suggestion':'核对路径','target_path':'/tmp/work/SKILL.md',
+                 'target_line':4,'details':{'token':'secret'}}
+        result=repair_prompt.generate_config(finding)
+        self.assertEqual(result['issue_id'],'config:demo')
+        self.assertIn('/tmp/work/SKILL.md',result['prompt'])
+        self.assertNotIn('secret',result['prompt'])
+        self.assertIn('不要自动 commit、push 或部署',result['prompt'])
+
+    def test_native_event_evidence_uses_only_issue_event_ids(self):
+        iid=self.issue('skill_read_failed')
+        self.con.execute('UPDATE issues SET details_json=? WHERE id=?',
+                         (json.dumps({'event_ids':['event-own']}),iid))
+        for event_id, command in [('event-own','cat SKILL.md'),
+                                  ('event-other','unrelated-secret')]:
+            self.con.execute('''INSERT INTO tool_events(id,session_id,turn_id,timestamp,
+                tool,command,target_paths,skill_paths,status,exit_code,path,line)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (event_id,self.sid,'turn-1','2026-09-23T00:00:01Z',
+                 'exec_command',command,'["/tmp/work/SKILL.md"]',
+                 '["/tmp/work/SKILL.md"]','failed',1,'/tmp/log.jsonl',20))
+        prompt=repair_prompt.generate(self.con,iid)['prompt']
+        self.assertIn('cat SKILL.md',prompt)
+        self.assertNotIn('unrelated-secret',prompt)
+        self.assertIn('native_tool_events',prompt)
 
 
 if __name__ == '__main__':

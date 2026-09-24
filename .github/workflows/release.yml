@@ -52,30 +52,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          binary="$PWD/build/pyinstaller-dist/codex-doctor"
-          "$binary" --version
-          tmp="$(mktemp -d)"
-          port="$(python -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
-          trap '"$binary" stop --data-dir "$tmp/state" --port "$port" >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT
-          "$binary" start --data-dir "$tmp/state" --codex-home "$tmp/empty-codex" --port "$port"
-          python - "$port" <<'PY'
-          import json, sys, time, urllib.request
-          root = f'http://127.0.0.1:{sys.argv[1]}'
-          for _ in range(30):
-              try:
-                  with urllib.request.urlopen(root + '/api/health', timeout=2) as response:
-                      health = json.load(response)
-                  assert health['service'] == 'codex-session-doctor'
-                  with urllib.request.urlopen(root + '/', timeout=2) as response:
-                      assert b'<html' in response.read().lower()
-                  with urllib.request.urlopen(root + '/app.js', timeout=2) as response:
-                      assert response.status == 200 and response.read()
-                  break
-              except OSError:
-                  time.sleep(1)
-          else:
-              raise SystemExit('standalone service did not become ready')
-          PY
+          python scripts/smoke_release.py "$PWD/build/pyinstaller-dist/codex-doctor"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}

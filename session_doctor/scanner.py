@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from . import diagnostics
+from . import diagnostics, trace_index
 from .parser import call_status, command_from, digest, difference, output_fingerprint, output_text, safe, title_from, usage
 from .store import connect
 
@@ -210,8 +210,10 @@ def scan(roots,data_dir,progress=None):
     con=connect(data_dir)
     now=dt.datetime.now(dt.timezone.utc).isoformat()
     con.execute("INSERT OR REPLACE INTO state VALUES('scanning','1')")
+    con.execute("INSERT OR REPLACE INTO state VALUES('trace_indexing','1')")
     con.commit()
     touched=set()
+    ledger_touched=set()
     seen=[]
     try:
         for root in roots:
@@ -246,6 +248,9 @@ def scan(roots,data_dir,progress=None):
                     offset,line,state=0,0,{'sid':session_id(p)}
                 if st.st_size==offset:
                     con.execute('UPDATE files SET size=?,status=? WHERE path=?',(st.st_size,folder if False else ('archived' if 'archived_sessions' in path.parts else 'active'),p))
+                    if trace_index.update(con,p,state['sid']):
+                        touched.add(state['sid'])
+                        con.commit()
                     continue
                 with path.open('rb') as f:
                     f.seek(offset)
@@ -281,6 +286,8 @@ def scan(roots,data_dir,progress=None):
                     ON CONFLICT(path) DO UPDATE SET dev=excluded.dev,ino=excluded.ino,size=excluded.size,offset=excluded.offset,line=excluded.line,session_id=excluded.session_id,state=excluded.state,status=excluded.status''',
                     (p,st.st_dev,st.st_ino,st.st_size,offset,line,state['sid'],json.dumps(state), 'archived' if 'archived_sessions' in path.parts else 'active'))
                 touched.add(state['sid'])
+                ledger_touched.add(state['sid'])
+                trace_index.update(con,p,state['sid'])
                 con.commit()
                 if progress:
                     progress(idx+1,len(seen))
@@ -291,12 +298,19 @@ def scan(roots,data_dir,progress=None):
         for row in con.execute('SELECT path,session_id FROM files'):
             if row['path'] not in live:
                 con.execute("UPDATE files SET status='missing' WHERE path=?",(row['path'],))
+        for row in con.execute('SELECT path FROM trace_files'):
+            if row['path'] not in live:
+                con.execute("UPDATE trace_files SET status='missing' WHERE path=?",(row['path'],))
         con.execute('''UPDATE sessions SET status=CASE
           WHEN EXISTS(SELECT 1 FROM files f WHERE f.session_id=sessions.id AND f.status='active') THEN
             CASE WHEN status IN ('running','completed','aborted','failed') THEN status ELSE 'active' END
           WHEN EXISTS(SELECT 1 FROM files f WHERE f.session_id=sessions.id AND f.status='archived') THEN
             CASE WHEN status LIKE 'archived · %' THEN status ELSE 'archived' || CASE WHEN status IN ('running','completed','aborted','failed') THEN ' · ' || status ELSE '' END END
           ELSE 'source missing' END''')
+        current_version=con.execute("SELECT value FROM state WHERE key='diagnostics_version'").fetchone()
+        if not current_version or current_version['value']!=diagnostics.VERSION:
+            touched.update(row['id'] for row in con.execute('SELECT id FROM sessions'))
+            con.execute("INSERT OR REPLACE INTO state VALUES('diagnostics_version',?)",(diagnostics.VERSION,))
         for sid in touched:
             diagnostics.analyze(con,sid)
         con.execute("INSERT OR REPLACE INTO state VALUES('last_scan',?)",(dt.datetime.now(dt.timezone.utc).isoformat(),))
@@ -306,9 +320,10 @@ def scan(roots,data_dir,progress=None):
         raise
     finally:
         con.execute("INSERT OR REPLACE INTO state VALUES('scanning','0')")
+        con.execute("INSERT OR REPLACE INTO state VALUES('trace_indexing','0')")
         con.commit()
         con.close()
-    if touched:
+    if ledger_touched:
         reconcile_mirrors(data_dir)
     return {'files':len(seen),'changed_sessions':len(touched)}
 

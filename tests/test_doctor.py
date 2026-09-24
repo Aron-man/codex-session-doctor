@@ -202,7 +202,8 @@ class DoctorTest(unittest.TestCase):
         from session_doctor import diagnostics
         diagnostics.analyze(con,sid)
         kinds={r[0] for r in con.execute('SELECT kind FROM issues')}
-        self.assertEqual(kinds,{'repeated_read','repeated_failure','large_output','large_context','low_cache'})
+        self.assertEqual(kinds,{'large_output','large_context','low_cache'})
+        self.assertEqual(store.issues(con,0)['total'],0)
         con.execute("UPDATE calls SET status='unknown',output_hash='different'||id")
         con.execute("UPDATE usage SET cached=100000")
         diagnostics.analyze(con,sid)

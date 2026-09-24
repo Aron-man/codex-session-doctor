@@ -82,8 +82,10 @@ class EstimateTest(unittest.TestCase):
 
     def test_unavailable_and_zero(self):
         self.assertIsNone(self.estimate()['percent'])  # no denominator
+        self.assertEqual(self.estimate()['state'], 'unobserved')
         self.add(sid='other')
         self.assertEqual(self.estimate()['percent'], 0)
+        self.assertEqual(self.estimate()['state'], 'unobserved')
         self.snapshot['weekly']['used_percent'] = None
         self.assertIsNone(self.estimate()['percent'])
         self.snapshot['weekly']['used_percent'] = 20
@@ -92,6 +94,15 @@ class EstimateTest(unittest.TestCase):
         self.snapshot['weekly']['resets_at'] = RESET
         self.snapshot['weekly'] = None
         self.assertIsNone(self.estimate()['percent'])
+        self.assertEqual(self.estimate()['state'], 'unavailable')
+
+    def test_historical_usage_outside_week_is_not_displayed_as_zero(self):
+        self.add(when=NOW-dt.timedelta(days=9))
+        self.add(sid='other')
+        result=self.estimate()
+        self.assertEqual(result['state'], 'out_of_window')
+        self.assertEqual(result['percent'], 0)  # legacy numeric compatibility
+        self.assertIn('本周期无已记录用量', result['reason'])
 
     def test_stale_snapshot_and_api(self):
         self.add()
